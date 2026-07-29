@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>社内ツール ポータル</title>
+<!-- Microsoft 認証ライブラリ（MSAL）。365のログイン情報から氏名を取得する。
+     通常はCDNから読み込む（このindex.html 1ファイルで完結）。
+     もし社内ネットワークがCDNをブロックしていて氏名が出ない場合は、
+     同フォルダの msal-browser.min.js に MSAL本体を入れて、下の1行を
+       <script src="./msal-browser.min.js"></script>
+     に差し替える。 -->
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.7.1/lib/msal-browser.min.js"></script>
+<style>
+  :root{
+    --bg:#f4f6fa; --panel:#ffffff; --text:#1b2430; --muted:#5b6675;
+    --border:#e2e7ef; --brand:#2563eb; --brand-weak:#e8f0fe;
+    --shadow:0 1px 3px rgba(20,30,50,.08),0 8px 24px rgba(20,30,50,.06);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f141b; --panel:#161d27; --text:#e7ecf3; --muted:#9aa7b8;
+      --border:#232c39; --brand:#5b8bff; --brand-weak:#1b2740;
+      --shadow:0 1px 3px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35); }
+  }
+  :root[data-theme="light"]{ --bg:#f4f6fa; --panel:#fff; --text:#1b2430; --muted:#5b6675; --border:#e2e7ef; --brand:#2563eb; --brand-weak:#e8f0fe; }
+  :root[data-theme="dark"]{ --bg:#0f141b; --panel:#161d27; --text:#e7ecf3; --muted:#9aa7b8; --border:#232c39; --brand:#5b8bff; --brand-weak:#1b2740; }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:"Yu Gothic UI","Yu Gothic","Meiryo","Segoe UI",system-ui,sans-serif;line-height:1.6;}
+  header{background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;}
+  .head-inner{max-width:1120px;margin:0 auto;padding:16px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  .logo{width:40px;height:40px;border-radius:10px;background:var(--brand);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:20px;flex:0 0 auto;}
+  .title h1{margin:0;font-size:19px;letter-spacing:.02em;}
+  .title p{margin:0;font-size:12.5px;color:var(--muted);}
+  .head-right{margin-left:auto;display:flex;align-items:center;gap:14px;}
+  .greet{font-size:13px;color:var(--muted);text-align:right;max-width:220px;}
+  .greet strong{color:var(--text);}
+  .btn{border:1px solid var(--brand);background:var(--brand);color:#fff;border-radius:10px;
+    padding:9px 16px;font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+  .btn.ghost{background:transparent;color:var(--brand);}
+  .btn:disabled{opacity:.55;cursor:default;}
+  .btn:hover:not(:disabled){filter:brightness(1.05);}
+
+  main{max-width:1120px;margin:0 auto;padding:26px 24px 64px;}
+  .banner{display:none;margin-bottom:16px;padding:10px 14px;border-radius:10px;font-size:13px;
+    background:#fef3d6;color:#8a6d10;border:1px solid #f0dfa8;}
+  .banner.show{display:block;}
+  .toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:22px;}
+  .search{flex:1 1 260px;position:relative;}
+  .search input{width:100%;padding:11px 14px 11px 40px;border:1px solid var(--border);
+    border-radius:10px;background:var(--panel);color:var(--text);font-size:14px;}
+  .search svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);opacity:.5;}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;}
+  .chip{padding:8px 14px;border:1px solid var(--border);background:var(--panel);
+    color:var(--muted);border-radius:999px;font-size:13px;cursor:pointer;white-space:nowrap;}
+  .chip.active{background:var(--brand);border-color:var(--brand);color:#fff;}
+
+  .section-title{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.06em;margin:26px 0 12px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:18px;box-shadow:var(--shadow);text-decoration:none;color:inherit;position:relative;
+    display:flex;flex-direction:column;gap:10px;transition:transform .12s ease,box-shadow .12s ease;}
+  a.card:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(20,30,50,.14),0 14px 40px rgba(20,30,50,.10);}
+  a.card .open-mark{position:absolute;top:14px;right:14px;color:var(--muted);opacity:0;transition:opacity .12s;}
+  a.card:hover .open-mark{opacity:.7;}
+  .card.card-disabled{opacity:.72;cursor:default;}
+  .card-top{display:flex;align-items:flex-start;gap:12px;}
+  .card-icon{width:38px;height:38px;border-radius:9px;background:var(--brand-weak);
+    color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:19px;flex:0 0 auto;}
+  .card h3{margin:0;font-size:15.5px;}
+  .card .dept{font-size:12px;color:var(--muted);}
+  .card p{margin:0;font-size:13px;color:var(--muted);flex:1;}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:2px;}
+  .badge{font-size:11px;padding:3px 9px;border-radius:6px;font-weight:600;}
+  .b-status-live{background:#e6f4ea;color:#1c7a3e;}
+  .b-status-dev{background:#fef3d6;color:#8a6d10;}
+  .b-status-prep{background:#eceff3;color:#5b6675;}
+  .b-nolink{background:#eceff3;color:#8a94a3;}
+  .b-lock{background:#efe7fb;color:#5b3fa0;}
+  @media (prefers-color-scheme: dark){
+    .b-status-live{background:#123422;color:#6fd598;}
+    .b-status-dev{background:#3a3212;color:#e6cf5a;}
+    .b-status-prep,.b-nolink{background:#232c39;color:#9aa7b8;}
+    .b-lock{background:#2a2340;color:#b9a6ff;}
+  }
+  .empty{padding:40px;text-align:center;color:var(--muted);}
+  footer{max-width:1120px;margin:0 auto;padding:20px 24px 40px;color:var(--muted);font-size:12px;border-top:1px solid var(--border);}
+  footer code{background:var(--brand-weak);color:var(--brand);padding:1px 6px;border-radius:5px;}
+
+  /* ---- 登録フォーム（モーダル）---- */
+  .overlay{position:fixed;inset:0;background:rgba(15,20,27,.5);display:none;
+    align-items:flex-start;justify-content:center;padding:40px 16px;z-index:50;overflow:auto;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:16px;width:100%;max-width:520px;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+  .modal-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;}
+  .modal-head h2{margin:0;font-size:17px;}
+  .modal-head .x{margin-left:auto;border:none;background:transparent;font-size:22px;color:var(--muted);cursor:pointer;line-height:1;}
+  .modal-body{padding:20px 22px;display:flex;flex-direction:column;gap:14px;}
+  .field label{display:block;font-size:12.5px;font-weight:600;margin-bottom:5px;}
+  .field label .req{color:#c0392b;}
+  .field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--border);
+    border-radius:9px;background:var(--bg);color:var(--text);font-size:14px;font-family:inherit;}
+  .field textarea{resize:vertical;min-height:64px;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:4px;}
+  .formmsg{font-size:13px;padding:8px 12px;border-radius:8px;display:none;}
+  .formmsg.ok{display:block;background:#e6f4ea;color:#1c7a3e;}
+  .formmsg.ng{display:block;background:#fdecea;color:#c0392b;}
+  .modal-foot{padding:16px 22px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;align-items:center;}
+  @media(max-width:520px){.row2{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<header>
+  <div class="head-inner">
+    <div class="logo">T</div>
+    <div class="title">
+      <h1>社内ツール ポータル</h1>
+      <p>自社ツールの入口</p>
+    </div>
+    <div class="head-right">
+      <div class="greet" id="greet"></div>
+      <button class="btn ghost" id="reloadBtn" title="最新に更新">↻</button>
+      <button class="btn" id="openForm">＋ ツールを登録</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="banner" id="banner"></div>
+  <div class="toolbar">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="search" type="text" placeholder="ツール名・部署・キーワードで検索">
+    </div>
+    <div class="filters" id="filters"></div>
+  </div>
+  <div id="board"></div>
+</main>
+
+<footer>
+  Microsoft 365 にサインイン済みの状態で開くと、右上に氏名が表示されます（個人認証）。<br>
+  ツール一覧は index.html 内のリストで管理しています（データ保存なし）。全社員が画面から登録できるようにしたい場合のみ GAS を設定してください。
+</footer>
+
+<!-- 登録フォーム -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>社内ツールを登録</h2>
+      <button class="x" id="closeForm" title="閉じる">×</button>
+    </div>
+    <form id="toolForm">
+      <div class="modal-body">
+        <div class="field">
+          <label>ツール名 <span class="req">*</span></label>
+          <input name="name" required placeholder="例）大石業務 効率化ツール">
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>部署</label>
+            <input name="dept" list="deptList" placeholder="例）土木部">
+            <datalist id="deptList"></datalist>
+          </div>
+          <div class="field">
+            <label>ステータス</label>
+            <select name="status">
+              <option value="live">公開中</option>
+              <option value="dev" selected>開発中</option>
+              <option value="prep">準備中</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>URL</label>
+          <input name="url" placeholder="URLを貼るだけでリンクされます（例）example.com/tool）">
+          <div class="hint">http:// が無くても自動補完。空欄なら「リンク未設定」。</div>
+        </div>
+        <div class="field">
+          <label>アイコン（絵文字）</label>
+          <input name="icon" maxlength="4" placeholder="🔧">
+        </div>
+        <div class="field">
+          <label>開ける人（公開範囲）</label>
+          <input name="allow" placeholder="空欄＝全員に表示／限定する人の365メールをカンマ区切り">
+          <div class="hint">例）ikeda-r@marubeni-co.jp, yamada@… と書くと、その人だけカードが表示されます（ログイン中の氏名・メールで判定）。</div>
+        </div>
+        <div class="field">
+          <label>説明</label>
+          <textarea name="desc" placeholder="ツールの概要を入力"></textarea>
+        </div>
+        <div class="formmsg" id="formmsg"></div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn ghost" id="cancelForm">閉じる</button>
+        <button type="submit" class="btn" id="submitBtn">登録する</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   設定：GAS ウェブアプリの URL を貼る（末尾が /exec のもの）
+   例) const GAS_URL = "https://script.google.com/macros/s/AKfy.../exec";
+   ※ 空のままでも、下の BASE_TOOLS を使ってサンプル表示されます。
+   ========================================================================= */
+const GAS_URL = "";
+
+/* =========================================================================
+   設定：Microsoft 365（Entra ID）ログイン
+   ★ 工事書類管理システムと同じアプリ登録（marubenishimadaテナント）を流用。
+   ★ 必要な作業は1つだけ：このアプリ登録の「リダイレクトURI(SPA)」に、
+      このポータルのURL（GitHub PagesのURL）を追加すること。
+      （Entra管理センター → アプリの登録 → 認証 → プラットフォーム SPA にURL追加）
+   ※ 別アプリとして分けたい場合は、新規にアプリ登録して下のIDを差し替える。
+   ※ 空にするとログイン機能はオフ（氏名は表示されない）。
+   ========================================================================= */
+const AUTH = {
+  clientId: "6328b63a-6799-4aef-80a2-e3e6c190cc8b",
+  tenantId: "cb8a44ea-32a2-48cb-9a9d-85be9107214f",
+};
+
+/* ツール一覧（この画面の本体）。GAS無しモードではここを直接編集して増減する。
+   dept=部署 / status: live(公開中)/dev(開発中)/prep(準備中) / url=貼るだけでリンク（空や"#"はリンク未設定）
+   allow=開ける人（公開範囲）: 省略/空 = 全員に表示。 メール配列を書くとその人だけに表示。
+         例) allow:["ikeda-r@marubeni-co.jp","yamada@..."]  ／ allow:["all"] は全員 */
+const BASE_TOOLS = [
+  { name:"大石業務 効率化ツール", dept:"土木部", icon:"🧱", status:"dev", url:"#",
+    desc:"大石さんの業務を効率化するツール。ゴール達成を最優先に手段を選定。" },
+  { name:"営業部 改善ツール", dept:"営業部", icon:"📈", status:"prep", url:"#",
+    desc:"営業部の業務課題を解決する改善ツール群。DX担当が要件を整理。" },
+];
+
+const STATUS = {
+  live:{ label:"公開中", cls:"b-status-live" },
+  dev: { label:"開発中", cls:"b-status-dev" },
+  prep:{ label:"準備中", cls:"b-status-prep" },
+};
+
+let TOOLS = [];
+let activeFilter = "all";
+let keyword = "";
+let currentEmail = null;   // ログイン中の365メール（小文字）。未ログイン時は null。
+
+function escapeHtml(s){return String(s==null?"":s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
+function toHref(u){
+  if(!u) return null; u=String(u).trim();
+  if(u===""||u==="#") return null;
+  if(/^(https?:\/\/|\/|\.\/|\.\.\/|mailto:|tel:)/i.test(u)) return u;
+  return "https://"+u;
+}
+function banner(msg){
+  const b=document.getElementById("banner");
+  if(!msg){ b.classList.remove("show"); b.textContent=""; return; }
+  b.textContent=msg; b.classList.add("show");
+}
+
+/* 公開範囲(allow)を配列へ正規化 */
+function allowList(t){
+  const a=t.allow;
+  if(!a) return [];
+  return (Array.isArray(a)?a:String(a).split(",")).map(s=>String(s).trim().toLowerCase()).filter(Boolean);
+}
+/* ログイン中の人がこのツールを見られるか。allow空=全員。限定ツールは本人が特定できないと非表示 */
+function canSee(t){
+  const list=allowList(t);
+  if(list.length===0 || list.includes("all")) return true;
+  if(!currentEmail) return false;
+  return list.includes(currentEmail);
+}
+/* 表示対象のツール（公開範囲でフィルタ済み） */
+function visibleTools(){ return TOOLS.filter(canSee); }
+/* このツールが限定公開かどうか（バッジ表示用） */
+function isRestricted(t){ const l=allowList(t); return l.length>0 && !l.includes("all"); }
+
+/* ---- データ取得（GAS）---- */
+async function loadTools(){
+  if(!GAS_URL){
+    // GAS無しモード（通常）：ツール一覧はファイル内の TOOLS_STATIC を使う。登録・更新はGAS設定時のみ。
+    TOOLS = BASE_TOOLS.slice();
+    banner("");
+    document.getElementById("openForm").style.display = "none";
+    document.getElementById("reloadBtn").style.display = "none";
+    render(); return;
+  }
+  try{
+    const res = await fetch(GAS_URL, {method:"GET"});
+    const data = await res.json();
+    if(data && data.ok && Array.isArray(data.tools)){
+      TOOLS = data.tools; banner("");
+    }else{ throw new Error("bad response"); }
+  }catch(e){
+    TOOLS = BASE_TOOLS.slice();
+    banner("読み込みに失敗しました。サンプルを表示中です（通信・GAS設定をご確認ください）。");
+  }
+  render();
+}
+
+/* ---- ツール登録（GAS へ POST）---- */
+async function addTool(tool){
+  if(!GAS_URL){
+    TOOLS.push(tool); render();
+    return { ok:false, offline:true };
+  }
+  // Content-Type: text/plain にして preflight を回避（GAS の CORS 対策）
+  const res = await fetch(GAS_URL, {
+    method:"POST",
+    headers:{ "Content-Type":"text/plain;charset=utf-8" },
+    body: JSON.stringify(tool)
+  });
+  const data = await res.json();
+  if(data && data.ok && Array.isArray(data.tools)){ TOOLS = data.tools; render(); }
+  return data;
+}
+
+/* ---- 描画 ---- */
+function buildFilters(){
+  const depts=[...new Set(visibleTools().map(t=>t.dept||"その他"))];
+  const box=document.getElementById("filters");
+  let html='<button class="chip'+(activeFilter==="all"?" active":"")+'" data-filter="all">すべて</button>';
+  depts.forEach(d=>{ html+='<button class="chip'+(activeFilter===d?" active":"")+'" data-filter="'+escapeHtml(d)+'">'+escapeHtml(d)+'</button>'; });
+  box.innerHTML=html;
+}
+function render(){
+  buildFilters();
+  const board=document.getElementById("board");
+  const q=keyword.trim().toLowerCase();
+  const list=visibleTools().filter(t=>{
+    const dept=t.dept||"その他";
+    const okCat=activeFilter==="all"||dept===activeFilter;
+    const hay=(t.name+" "+dept+" "+(t.desc||"")).toLowerCase();
+    return okCat && (!q||hay.includes(q));
+  });
+  if(!list.length){ board.innerHTML='<div class="empty">該当するツールがありません。</div>'; return; }
+  const depts=[...new Set(list.map(t=>t.dept||"その他"))];
+  let html="";
+  depts.forEach(dept=>{
+    const items=list.filter(t=>(t.dept||"その他")===dept);
+    html+='<div class="section-title">'+escapeHtml(dept)+'</div><div class="grid">';
+    items.forEach(t=>{
+      const s=STATUS[t.status]||STATUS.prep;
+      const href=toHref(t.url);
+      const openMark='<span class="open-mark"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg></span>';
+      const linkBadge=href?'':'<span class="badge b-nolink">リンク未設定</span>';
+      const lockBadge=isRestricted(t)?'<span class="badge b-lock">🔒 限定</span>':'';
+      const inner=''
+        +(href?openMark:'')
+        +'<div class="card-top">'
+        +  '<div class="card-icon">'+escapeHtml(t.icon||"🔧")+'</div>'
+        +  '<div style="flex:1"><h3>'+escapeHtml(t.name)+'</h3><div class="dept">'+escapeHtml(t.dept||"その他")+'</div></div>'
+        +'</div>'
+        +'<p>'+escapeHtml(t.desc||"")+'</p>'
+        +'<div class="badges"><span class="badge '+s.cls+'">'+s.label+'</span>'+linkBadge+lockBadge+'</div>';
+      html+= href
+        ? '<a class="card" href="'+escapeHtml(href)+'" target="_blank" rel="noopener">'+inner+'</a>'
+        : '<div class="card card-disabled">'+inner+'</div>';
+    });
+    html+='</div>';
+  });
+  board.innerHTML=html;
+}
+
+/* ---- イベント ---- */
+document.getElementById("filters").addEventListener("click",e=>{ const b=e.target.closest(".chip"); if(!b)return; activeFilter=b.dataset.filter; render(); });
+document.getElementById("search").addEventListener("input",e=>{ keyword=e.target.value; render(); });
+document.getElementById("reloadBtn").addEventListener("click",loadTools);
+
+/* ---- 登録フォーム ---- */
+const overlay=document.getElementById("overlay");
+const form=document.getElementById("toolForm");
+const formmsg=document.getElementById("formmsg");
+const submitBtn=document.getElementById("submitBtn");
+function openForm(){ updateDeptList(); formmsg.className="formmsg"; formmsg.textContent=""; overlay.classList.add("show"); }
+function closeForm(){ overlay.classList.remove("show"); form.reset(); formmsg.className="formmsg"; }
+document.getElementById("openForm").addEventListener("click",openForm);
+document.getElementById("closeForm").addEventListener("click",closeForm);
+document.getElementById("cancelForm").addEventListener("click",closeForm);
+overlay.addEventListener("click",e=>{ if(e.target===overlay) closeForm(); });
+function updateDeptList(){
+  const depts=[...new Set(TOOLS.map(t=>t.dept).filter(Boolean))];
+  document.getElementById("deptList").innerHTML=depts.map(d=>'<option value="'+escapeHtml(d)+'">').join("");
+}
+form.addEventListener("submit",async e=>{
+  e.preventDefault();
+  const f=new FormData(form);
+  const tool={
+    name:(f.get("name")||"").trim(),
+    dept:(f.get("dept")||"").trim()||"その他",
+    icon:(f.get("icon")||"").trim()||"🔧",
+    status:f.get("status")||"prep",
+    url:(f.get("url")||"").trim()||"#",
+    desc:(f.get("desc")||"").trim(),
+    allow:String(f.get("allow")||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean)
+  };
+  if(!tool.name) return;
+  submitBtn.disabled=true; submitBtn.textContent="登録中…"; formmsg.className="formmsg";
+  try{
+    const r=await addTool(tool);
+    if(r && r.ok){
+      formmsg.className="formmsg ok"; formmsg.textContent="登録しました。全社員のポータルに反映されます。";
+      form.reset(); setTimeout(closeForm,900);
+    }else if(r && r.offline){
+      formmsg.className="formmsg ok"; formmsg.textContent="仮追加しました（GAS未接続のため共有はされません）。";
+      form.reset(); setTimeout(closeForm,1200);
+    }else{
+      formmsg.className="formmsg ng"; formmsg.textContent="登録に失敗しました："+((r&&r.error)||"不明なエラー");
+    }
+  }catch(err){
+    formmsg.className="formmsg ng"; formmsg.textContent="通信エラー："+String(err);
+  }finally{
+    submitBtn.disabled=false; submitBtn.textContent="登録する";
+  }
+});
+
+/* ---- Microsoft 365 ログイン（MSAL）で氏名を表示 ---- */
+async function initAuth(){
+  const el=document.getElementById("greet");
+  if(!AUTH.clientId){ el.textContent=""; return; }        // 未設定ならオフ
+  if(!window.msal){ el.textContent=""; return; }           // ライブラリ未読込
+
+  const pca=new msal.PublicClientApplication({
+    auth:{
+      clientId:AUTH.clientId,
+      authority:"https://login.microsoftonline.com/"+(AUTH.tenantId||"organizations"),
+      redirectUri:window.location.origin+window.location.pathname
+    },
+    cache:{ cacheLocation:"sessionStorage" }
+  });
+  try{
+    await pca.initialize();
+    // リダイレクト帰還時の結果を処理
+    const redirect=await pca.handleRedirectPromise();
+    let account=(redirect&&redirect.account) || pca.getAllAccounts()[0];
+
+    if(!account){
+      // 365にサインイン済みなら、追加ログインなしで取得を試みる
+      try{
+        const r=await pca.ssoSilent({ scopes:["User.Read"] });
+        account=r.account;
+      }catch(e){
+        // サイレント不可 → 通常のリダイレクトログイン（多くは自動で戻る）
+        await pca.loginRedirect({ scopes:["User.Read"] });
+        return;
+      }
+    }
+    if(account){
+      pca.setActiveAccount(account);
+      window.__me={ name:account.name, email:account.username };
+      currentEmail=(account.username||"").toLowerCase();
+      el.innerHTML="ようこそ、<strong>"+escapeHtml(account.name||account.username)+"</strong> さん";
+      render();  // 誰が見ているか判明したので、公開範囲でツールを出し分ける
+    }
+  }catch(err){
+    el.textContent="";
+  }
+}
+
+initAuth();
+loadTools();
+</script>
+</body>
+</html>
