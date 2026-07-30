@@ -191,8 +191,8 @@
         </div>
         <div class="field">
           <label>開ける人（公開範囲）</label>
-          <input name="allow" placeholder="空欄＝全員に表示／限定する人の365メールをカンマ区切り">
-          <div class="hint">例）ikeda-r@marubeni-co.jp, yamada@… と書くと、その人だけカードが表示されます（ログイン中の氏名・メールで判定）。</div>
+          <input name="allow" placeholder="空欄＝全員に表示／限定する人の氏名（表示名）をカンマ区切り">
+          <div class="hint">例）池田玲, 山田太郎 と書くと、その人だけカードが表示されます（ログイン中の365表示名で判定。空白の有無は無視）。</div>
         </div>
         <div class="field">
           <label>説明</label>
@@ -232,8 +232,8 @@ const AUTH = {
 
 /* ツール一覧（この画面の本体）。GAS無しモードではここを直接編集して増減する。
    dept=部署 / status: live(公開中)/dev(開発中)/prep(準備中) / url=貼るだけでリンク（空や"#"はリンク未設定）
-   allow=開ける人（公開範囲）: 省略/空 = 全員に表示。 メール配列を書くとその人だけに表示。
-         例) allow:["ikeda-r@marubeni-co.jp","yamada@..."]  ／ allow:["all"] は全員 */
+   allow=開ける人（公開範囲）: 省略/空 = 全員に表示。 氏名(表示名)配列を書くとその人だけに表示。
+         例) allow:["池田玲","山田太郎"]  ／ allow:["all"] は全員（管理者 池田玲 は常に全ツール閲覧可） */
 const BASE_TOOLS = [
   { name:"大石業務 効率化ツール", dept:"土木部", icon:"🧱", status:"dev", url:"#",
     desc:"大石さんの業務を効率化するツール。ゴール達成を最優先に手段を選定。" },
@@ -251,6 +251,15 @@ let TOOLS = [];
 let activeFilter = "all";
 let keyword = "";
 let currentEmail = null;   // ログイン中の365メール（小文字）。未ログイン時は null。
+let currentName  = null;   // ログイン中の365表示名（正規化済み）。未ログイン時は null。
+
+/* 登録・編集・削除ができる管理者（365の表示名で指定）。ここに名前を足せば増やせる。 */
+const ADMIN_NAMES = ["池田玲"];
+
+/* 名前の表記ゆれ吸収：前後空白除去・全角/半角空白除去・小文字化 */
+function norm(s){ return String(s==null?"":s).trim().toLowerCase().replace(/[\s　]+/g,""); }
+/* ログイン中の人が管理者（池田玲）か */
+function isAdmin(){ return !!currentName && ADMIN_NAMES.map(norm).includes(currentName); }
 
 function escapeHtml(s){return String(s==null?"":s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function toHref(u){
@@ -265,32 +274,42 @@ function banner(msg){
   b.textContent=msg; b.classList.add("show");
 }
 
-/* 公開範囲(allow)を配列へ正規化 */
+/* 公開範囲(allow)を配列へ正規化（表示名を想定。表記ゆれ吸収のため norm 済み） */
 function allowList(t){
   const a=t.allow;
   if(!a) return [];
-  return (Array.isArray(a)?a:String(a).split(",")).map(s=>String(s).trim().toLowerCase()).filter(Boolean);
+  return (Array.isArray(a)?a:String(a).split(",")).map(norm).filter(Boolean);
 }
-/* ログイン中の人がこのツールを見られるか。allow空=全員。限定ツールは本人が特定できないと非表示 */
+/* ログイン中の人がこのツールを見られるか。allow空=全員。限定ツールは本人（表示名）が特定できないと非表示 */
 function canSee(t){
   const list=allowList(t);
   if(list.length===0 || list.includes("all")) return true;
-  if(!currentEmail) return false;
-  return list.includes(currentEmail);
+  if(isAdmin()) return true;          // 管理者（池田玲）は全ツール閲覧可
+  if(!currentName) return false;
+  return list.includes(currentName);
 }
 /* 表示対象のツール（公開範囲でフィルタ済み） */
 function visibleTools(){ return TOOLS.filter(canSee); }
 /* このツールが限定公開かどうか（バッジ表示用） */
 function isRestricted(t){ const l=allowList(t); return l.length>0 && !l.includes("all"); }
 
+/* 権限に応じてボタンの表示を切り替える。登録は管理者(池田玲)のみ。 */
+function applyPerms(){
+  const openBtn=document.getElementById("openForm");
+  const reloadBtn=document.getElementById("reloadBtn");
+  // 登録ボタン：GASが有り かつ 管理者本人 のときだけ表示
+  openBtn.style.display = (GAS_URL && isAdmin()) ? "" : "none";
+  // 更新ボタン：GASが有るときだけ表示
+  reloadBtn.style.display = GAS_URL ? "" : "none";
+}
+
 /* ---- データ取得（GAS）---- */
 async function loadTools(){
   if(!GAS_URL){
-    // GAS無しモード（通常）：ツール一覧はファイル内の TOOLS_STATIC を使う。登録・更新はGAS設定時のみ。
+    // GAS無しモード（通常）：ツール一覧はファイル内の BASE_TOOLS を使う。登録・更新はGAS設定時のみ。
     TOOLS = BASE_TOOLS.slice();
     banner("");
-    document.getElementById("openForm").style.display = "none";
-    document.getElementById("reloadBtn").style.display = "none";
+    applyPerms();
     render(); return;
   }
   try{
@@ -303,11 +322,13 @@ async function loadTools(){
     TOOLS = BASE_TOOLS.slice();
     banner("読み込みに失敗しました。サンプルを表示中です（通信・GAS設定をご確認ください）。");
   }
+  applyPerms();
   render();
 }
 
 /* ---- 追加・編集（GAS へ POST）---- */
 async function saveTool(tool){
+  if(!isAdmin()) return { ok:false, error:"登録・編集の権限がありません（管理者のみ）" };
   if(!GAS_URL){
     TOOLS.push(tool); render();
     return { ok:false, offline:true };
@@ -327,6 +348,7 @@ async function saveTool(tool){
 
 /* ---- 削除（GAS へ POST）---- */
 async function deleteTool(id){
+  if(!isAdmin()) return { ok:false, error:"削除の権限がありません（管理者のみ）" };
   if(!GAS_URL) return { ok:false, offline:true };
   const res = await fetch(GAS_URL, {
     method:"POST",
@@ -368,7 +390,7 @@ function render(){
       const openMark='<span class="open-mark"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg></span>';
       const linkBadge=href?'':'<span class="badge b-nolink">リンク未設定</span>';
       const lockBadge=isRestricted(t)?'<span class="badge b-lock">🔒 限定</span>':'';
-      const canEdit=!!(GAS_URL && t.id);
+      const canEdit=!!(GAS_URL && t.id && isAdmin());   // 編集✎/削除× は管理者(池田玲)のみ
       const toolsBtns=canEdit
         ? '<span class="card-tools"><span class="card-edit" data-id="'+escapeHtml(t.id)+'" title="編集">✎</span><span class="card-del" data-id="'+escapeHtml(t.id)+'" title="削除">×</span></span>'
         : '';
@@ -459,7 +481,7 @@ form.addEventListener("submit",async e=>{
     status:f.get("status")||"prep",
     url:(f.get("url")||"").trim()||"#",
     desc:(f.get("desc")||"").trim(),
-    allow:String(f.get("allow")||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean)
+    allow:String(f.get("allow")||"").split(",").map(s=>s.trim()).filter(Boolean)
   };
   if(!tool.name) return;
   const wasEdit=!!editingId;
@@ -517,8 +539,10 @@ async function initAuth(){
       pca.setActiveAccount(account);
       window.__me={ name:account.name, email:account.username };
       currentEmail=(account.username||"").toLowerCase();
+      currentName=norm(account.name||"");   // 表示名（公開範囲・管理者判定に使用）
       el.innerHTML="ようこそ、<strong>"+escapeHtml(account.name||account.username)+"</strong> さん";
-      render();  // 誰が見ているか判明したので、公開範囲でツールを出し分ける
+      applyPerms();  // 池田玲なら登録ボタンを表示
+      render();      // 誰が見ているか判明したので、公開範囲でツールを出し分ける
     }
   }catch(err){
     el.textContent="";
