@@ -92,6 +92,21 @@
     .b-status-prep,.b-nolink{background:#232c39;color:#9aa7b8;}
     .b-lock{background:#2a2340;color:#b9a6ff;}
   }
+  /* ---- ロード中（スピナー＋スケルトン）---- */
+  .loading-head{display:flex;align-items:center;gap:12px;justify-content:center;color:var(--muted);font-size:14px;margin:14px 0 22px;}
+  .spinner{width:26px;height:26px;border:3px solid var(--border);border-top-color:var(--brand);border-radius:50%;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .skel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+  .skel-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);position:relative;overflow:hidden;min-height:150px;}
+  .skel{background:var(--border);border-radius:7px;}
+  .skel-row{display:flex;gap:12px;align-items:center;margin-bottom:14px;}
+  .skel-ic{width:38px;height:38px;border-radius:9px;flex:0 0 auto;}
+  .skel-l{height:12px;} .skel-l.w40{width:40%;} .skel-l.w60{width:60%;} .skel-l.w75{width:75%;} .skel-l.w90{width:90%;}
+  .skel-card::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);animation:shim 1.3s infinite;}
+  @keyframes shim{100%{transform:translateX(100%);}}
+  @media (prefers-color-scheme: dark){ .skel-card::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);} }
+
   .empty{padding:40px;text-align:center;color:var(--muted);}
   footer{max-width:1120px;margin:0 auto;padding:20px 24px 40px;color:var(--muted);font-size:12px;border-top:1px solid var(--border);}
   footer code{background:var(--brand-weak);color:var(--brand);padding:1px 6px;border-radius:5px;}
@@ -303,6 +318,22 @@ function applyPerms(){
   reloadBtn.style.display = GAS_URL ? "" : "none";
 }
 
+/* ---- ロード中の表示（スピナー＋スケルトンカード）---- */
+function loadingHTML(n){
+  let cards="";
+  for(let i=0;i<(n||6);i++){
+    cards+='<div class="skel-card">'
+      +'<div class="skel-row"><div class="skel skel-ic"></div><div style="flex:1">'
+      +'<div class="skel skel-l w60" style="margin-bottom:8px"></div><div class="skel skel-l w40"></div></div></div>'
+      +'<div class="skel skel-l w90" style="margin-bottom:10px"></div>'
+      +'<div class="skel skel-l w75" style="margin-bottom:18px"></div>'
+      +'<div class="skel skel-l w40"></div></div>';
+  }
+  return '<div class="loading"><div class="loading-head"><span class="spinner"></span>ツールを読み込み中…</div>'
+    +'<div class="skel-grid">'+cards+'</div></div>';
+}
+function showLoading(){ document.getElementById("board").innerHTML=loadingHTML(6); }
+
 /* ---- データ取得（GAS）---- */
 async function loadTools(){
   if(!GAS_URL){
@@ -312,6 +343,7 @@ async function loadTools(){
     applyPerms();
     render(); return;
   }
+  showLoading();   // 読み込み中はロード画面を表示（GAS取得が終わったら render() が上書き）
   try{
     const res = await fetch(GAS_URL, {method:"GET"});
     const data = await res.json();
