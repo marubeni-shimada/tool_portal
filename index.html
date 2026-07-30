@@ -68,6 +68,11 @@
   a.card .open-mark{position:absolute;top:14px;right:14px;color:var(--muted);opacity:0;transition:opacity .12s;}
   a.card:hover .open-mark{opacity:.7;}
   .card.card-disabled{opacity:.72;cursor:default;}
+  .card-tools{position:absolute;top:10px;right:10px;display:flex;gap:4px;opacity:0;transition:opacity .12s;z-index:2;}
+  .card:hover .card-tools{opacity:1;}
+  .card-tools span{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-size:12px;cursor:pointer;line-height:1;}
+  .card-tools span:hover{background:var(--brand-weak);color:var(--brand);border-color:var(--brand);}
+  .card-tools .card-del:hover{background:#fdecea;color:#c0392b;border-color:#e5b5b5;}
   .card-top{display:flex;align-items:flex-start;gap:12px;}
   .card-icon{width:38px;height:38px;border-radius:9px;background:var(--brand-weak);
     color:var(--brand);display:flex;align-items:center;justify-content:center;font-size:19px;flex:0 0 auto;}
@@ -151,7 +156,7 @@
 <div class="overlay" id="overlay">
   <div class="modal">
     <div class="modal-head">
-      <h2>社内ツールを登録</h2>
+      <h2 id="formTitle">社内ツールを登録</h2>
       <button class="x" id="closeForm" title="閉じる">×</button>
     </div>
     <form id="toolForm">
@@ -301,17 +306,32 @@ async function loadTools(){
   render();
 }
 
-/* ---- ツール登録（GAS へ POST）---- */
-async function addTool(tool){
+/* ---- 追加・編集（GAS へ POST）---- */
+async function saveTool(tool){
   if(!GAS_URL){
     TOOLS.push(tool); render();
     return { ok:false, offline:true };
   }
+  const action = editingId ? "update" : "add";
+  if(editingId) tool.id = editingId;
   // Content-Type: text/plain にして preflight を回避（GAS の CORS 対策）
   const res = await fetch(GAS_URL, {
     method:"POST",
     headers:{ "Content-Type":"text/plain;charset=utf-8" },
-    body: JSON.stringify(tool)
+    body: JSON.stringify({ action: action, tool: tool })
+  });
+  const data = await res.json();
+  if(data && data.ok && Array.isArray(data.tools)){ TOOLS = data.tools; render(); }
+  return data;
+}
+
+/* ---- 削除（GAS へ POST）---- */
+async function deleteTool(id){
+  if(!GAS_URL) return { ok:false, offline:true };
+  const res = await fetch(GAS_URL, {
+    method:"POST",
+    headers:{ "Content-Type":"text/plain;charset=utf-8" },
+    body: JSON.stringify({ action:"delete", tool:{ id: id } })
   });
   const data = await res.json();
   if(data && data.ok && Array.isArray(data.tools)){ TOOLS = data.tools; render(); }
@@ -348,8 +368,13 @@ function render(){
       const openMark='<span class="open-mark"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17 17 7M9 7h8v8"/></svg></span>';
       const linkBadge=href?'':'<span class="badge b-nolink">リンク未設定</span>';
       const lockBadge=isRestricted(t)?'<span class="badge b-lock">🔒 限定</span>':'';
+      const canEdit=!!(GAS_URL && t.id);
+      const toolsBtns=canEdit
+        ? '<span class="card-tools"><span class="card-edit" data-id="'+escapeHtml(t.id)+'" title="編集">✎</span><span class="card-del" data-id="'+escapeHtml(t.id)+'" title="削除">×</span></span>'
+        : '';
       const inner=''
-        +(href?openMark:'')
+        +((href && !canEdit)?openMark:'')
+        +toolsBtns
         +'<div class="card-top">'
         +  '<div class="card-icon">'+escapeHtml(t.icon||"🔧")+'</div>'
         +  '<div style="flex:1"><h3>'+escapeHtml(t.name)+'</h3><div class="dept">'+escapeHtml(t.dept||"その他")+'</div></div>'
@@ -370,13 +395,52 @@ document.getElementById("filters").addEventListener("click",e=>{ const b=e.targe
 document.getElementById("search").addEventListener("input",e=>{ keyword=e.target.value; render(); });
 document.getElementById("reloadBtn").addEventListener("click",loadTools);
 
+/* カード上の 編集✎ / 削除× */
+document.getElementById("board").addEventListener("click",async e=>{
+  const ed=e.target.closest(".card-edit");
+  const de=e.target.closest(".card-del");
+  if(ed){ e.preventDefault(); e.stopPropagation(); openEdit(ed.dataset.id); return; }
+  if(de){
+    e.preventDefault(); e.stopPropagation();
+    const id=de.dataset.id;
+    const t=TOOLS.find(x=>x.id===id);
+    if(!confirm("「"+(t?t.name:"")+"」を削除します。よろしいですか？")) return;
+    const r=await deleteTool(id);
+    if(!(r&&r.ok)) alert("削除に失敗しました："+((r&&r.error)||"通信エラー"));
+    return;
+  }
+});
+
 /* ---- 登録フォーム ---- */
 const overlay=document.getElementById("overlay");
 const form=document.getElementById("toolForm");
 const formmsg=document.getElementById("formmsg");
 const submitBtn=document.getElementById("submitBtn");
-function openForm(){ updateDeptList(); formmsg.className="formmsg"; formmsg.textContent=""; overlay.classList.add("show"); }
-function closeForm(){ overlay.classList.remove("show"); form.reset(); formmsg.className="formmsg"; }
+const formTitle=document.getElementById("formTitle");
+let editingId=null;   // 編集中のツールid（新規登録時はnull）
+
+function openForm(){
+  editingId=null; form.reset();
+  formTitle.textContent="社内ツールを登録"; submitBtn.textContent="登録する";
+  updateDeptList(); formmsg.className="formmsg"; formmsg.textContent="";
+  overlay.classList.add("show");
+}
+function openEdit(id){
+  const t=TOOLS.find(x=>x.id===id); if(!t) return;
+  editingId=id; form.reset();
+  formTitle.textContent="ツールを編集"; submitBtn.textContent="保存する";
+  updateDeptList();
+  form.elements["name"].value=t.name||"";
+  form.elements["dept"].value=t.dept||"";
+  form.elements["status"].value=t.status||"prep";
+  form.elements["url"].value=(t.url&&t.url!=="#")?t.url:"";
+  form.elements["icon"].value=t.icon||"";
+  form.elements["allow"].value=Array.isArray(t.allow)?t.allow.join(", "):(t.allow||"");
+  form.elements["desc"].value=t.desc||"";
+  formmsg.className="formmsg"; formmsg.textContent="";
+  overlay.classList.add("show");
+}
+function closeForm(){ overlay.classList.remove("show"); form.reset(); editingId=null; formmsg.className="formmsg"; }
 document.getElementById("openForm").addEventListener("click",openForm);
 document.getElementById("closeForm").addEventListener("click",closeForm);
 document.getElementById("cancelForm").addEventListener("click",closeForm);
@@ -398,22 +462,23 @@ form.addEventListener("submit",async e=>{
     allow:String(f.get("allow")||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean)
   };
   if(!tool.name) return;
-  submitBtn.disabled=true; submitBtn.textContent="登録中…"; formmsg.className="formmsg";
+  const wasEdit=!!editingId;
+  submitBtn.disabled=true; submitBtn.textContent=wasEdit?"保存中…":"登録中…"; formmsg.className="formmsg";
   try{
-    const r=await addTool(tool);
+    const r=await saveTool(tool);
     if(r && r.ok){
-      formmsg.className="formmsg ok"; formmsg.textContent="登録しました。全社員のポータルに反映されます。";
+      formmsg.className="formmsg ok"; formmsg.textContent=wasEdit?"保存しました。":"登録しました。全社員のポータルに反映されます。";
       form.reset(); setTimeout(closeForm,900);
     }else if(r && r.offline){
       formmsg.className="formmsg ok"; formmsg.textContent="仮追加しました（GAS未接続のため共有はされません）。";
       form.reset(); setTimeout(closeForm,1200);
     }else{
-      formmsg.className="formmsg ng"; formmsg.textContent="登録に失敗しました："+((r&&r.error)||"不明なエラー");
+      formmsg.className="formmsg ng"; formmsg.textContent=(wasEdit?"保存":"登録")+"に失敗しました："+((r&&r.error)||"不明なエラー");
     }
   }catch(err){
     formmsg.className="formmsg ng"; formmsg.textContent="通信エラー："+String(err);
   }finally{
-    submitBtn.disabled=false; submitBtn.textContent="登録する";
+    submitBtn.disabled=false; submitBtn.textContent=editingId?"保存する":"登録する";
   }
 });
 
