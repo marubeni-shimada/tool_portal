@@ -335,24 +335,41 @@ function loadingHTML(n){
 function showLoading(){ document.getElementById("board").innerHTML=loadingHTML(6); }
 
 /* ---- データ取得（GAS）---- */
+const TOOLS_CACHE = "portal_tools_cache";   // 前回成功した一覧を保存する（次回すぐ表示するため）
+
+/* 前回の一覧をローカルから即表示（あれば true）。GASが遅くても空にならないようにする */
+function renderFromCache(){
+  try{
+    const c = JSON.parse(localStorage.getItem(TOOLS_CACHE));
+    if(c && Array.isArray(c) && c.length){ TOOLS = c; applyPerms(); render(); return true; }
+  }catch(e){}
+  return false;
+}
+
 async function loadTools(){
   if(!GAS_URL){
-    // GAS無しモード（通常）：ツール一覧はファイル内の BASE_TOOLS を使う。登録・更新はGAS設定時のみ。
+    // GAS無しモード：ファイル内の BASE_TOOLS を使う。
     TOOLS = BASE_TOOLS.slice();
-    banner("");
-    applyPerms();
-    render(); return;
+    banner(""); applyPerms(); render(); return;
   }
-  showLoading();   // 読み込み中はロード画面を表示（GAS取得が終わったら render() が上書き）
+  // ① まず前回の一覧を即表示（あれば）。無ければローディング表示。
+  const hadCache = renderFromCache();
+  if(!hadCache) showLoading();
+  // ② 8秒でタイムアウトしてGASを取りにいく（固まって空のまま、を防ぐ）
   try{
-    const res = await fetch(GAS_URL, {method:"GET"});
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), 8000);
+    const res = await fetch(GAS_URL, {method:"GET", signal:ctrl.signal});
+    clearTimeout(to);
     const data = await res.json();
     if(data && data.ok && Array.isArray(data.tools)){
       TOOLS = data.tools; banner("");
+      try{ localStorage.setItem(TOOLS_CACHE, JSON.stringify(TOOLS)); }catch(e){}   // 次回用に保存
     }else{ throw new Error("bad response"); }
   }catch(e){
-    TOOLS = BASE_TOOLS.slice();
-    banner("読み込みに失敗しました。サンプルを表示中です（通信・GAS設定をご確認ください）。");
+    // ③ 失敗しても：前回キャッシュがあればそれを維持、無ければサンプル。空にはしない。
+    if(!TOOLS.length){ TOOLS = BASE_TOOLS.slice(); }
+    banner("最新の取得に失敗しました。"+(TOOLS.length?"前回の内容を表示中です。":"")+"（通信・GAS設定をご確認ください）");
   }
   applyPerms();
   render();
