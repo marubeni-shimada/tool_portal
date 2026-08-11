@@ -132,6 +132,18 @@
   .formmsg.ng{display:block;background:#fdecea;color:#c0392b;}
   .modal-foot{padding:16px 22px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;align-items:center;}
   @media(max-width:520px){.row2{grid-template-columns:1fr;}}
+
+  /* ===== ひとやすみ ミニゲーム（現場ダッシュ）===== */
+  .game-widget{position:fixed;right:18px;bottom:18px;width:300px;background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;z-index:40;font-family:inherit;}
+  .gw-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);}
+  .gw-head .t{font-size:12.5px;font-weight:700;} .gw-head .hi{margin-left:auto;font-size:11px;color:var(--muted);}
+  .gw-head button{border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:14px;line-height:1;width:22px;height:22px;border-radius:6px;}
+  .gw-head button:hover{background:var(--brand-weak);color:var(--brand);}
+  .gw-body{position:relative;}
+  .game-widget canvas{display:block;width:100%;height:132px;background:linear-gradient(#dfe7f5,#eef2fa);cursor:pointer;touch-action:manipulation;}
+  @media (prefers-color-scheme: dark){ .game-widget canvas{background:linear-gradient(#1a2330,#10161f);} }
+  .gw-tip{position:absolute;left:0;right:0;bottom:0;padding:4px 8px;font-size:10.5px;color:var(--muted);text-align:center;pointer-events:none;}
+  .game-fab{position:fixed;right:18px;bottom:18px;background:var(--brand);color:#fff;border:none;border-radius:999px;padding:9px 14px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:var(--shadow);z-index:40;display:none;}
 </style>
 </head>
 <body>
@@ -613,6 +625,148 @@ async function initAuth(){
 // ツールは認証を待たずに即表示（先に呼ぶ）。認証は裏で走り、取れたら氏名表示＋限定ツール反映。
 loadTools();
 initAuth();
+</script>
+
+<!-- ひとやすみ ミニゲーム（現場ダッシュ）※オリジナル。ツール表示・認証には影響しません。右上−でしまえます -->
+<button class="game-fab" id="gameFab">🎮 ひとやすみ</button>
+<div class="game-widget" id="gameWidget">
+  <div class="gw-head">
+    <span class="t">🏗️ 現場ダッシュ</span>
+    <span class="hi">最高 <b id="hiScore">0</b></span>
+    <button id="gameMin" title="しまう">−</button>
+  </div>
+  <div class="gw-body">
+    <canvas id="gameCanvas" width="600" height="264"></canvas>
+    <div class="gw-tip" id="gameTip">クリック / スペースでジャンプ</div>
+  </div>
+</div>
+<script>
+(function(){
+  const HIKEY='genba_dash_hi', MINKEY='genba_dash_min';
+  const widget=document.getElementById('gameWidget');
+  const fab=document.getElementById('gameFab');
+  const cv=document.getElementById('gameCanvas');
+  const ctx=cv.getContext('2d');
+  const tip=document.getElementById('gameTip');
+  const hiEl=document.getElementById('hiScore');
+  const DPR=2, W=300, H=132;
+  ctx.scale(DPR,DPR);
+
+  let hi=parseInt(localStorage.getItem(HIKEY)||'0',10)||0; hiEl.textContent=hi;
+
+  const groundY=108, px=30, pw=16, ph=22;
+  let state='ready';
+  let py, vy, onGround, jumps, obs, speed, score, spawn, legFrame, raf=null;
+
+  function reset(){
+    py=groundY-ph; vy=0; onGround=true; jumps=0; obs=[]; speed=2.3; score=0; spawn=40; legFrame=0;
+    state='ready';
+  }
+  function start(){ if(state==='play')return; if(state==='over')reset(); state='play'; tip.style.opacity=0; }
+  function jump(){
+    if(state!=='play'){ start(); return; }
+    if(jumps<2){ vy = -6.6; onGround=false; jumps++; }   // 2段ジャンプ
+  }
+  function gameOver(){
+    state='over';
+    if(score>hi){ hi=score; try{localStorage.setItem(HIKEY,String(hi));}catch(e){} hiEl.textContent=hi; }
+    tip.style.opacity=1; tip.textContent='クリックでもう一度';
+  }
+  function overPit(){
+    const cx=px+pw/2;
+    for(const o of obs){ if(o.type==='pit' && cx>o.x+2 && cx<o.x+o.w-2) return true; }
+    return false;
+  }
+  function update(){
+    vy+=0.6; py+=vy;
+    if(py>=groundY-ph){
+      if(overPit()){ onGround=false; if(py>groundY+10){ gameOver(); return; } }
+      else { py=groundY-ph; vy=0; onGround=true; jumps=0; }
+    }
+    spawn--;
+    if(spawn<=0){
+      if(Math.random()<0.32){ const w=Math.floor(26+Math.random()*16); obs.push({type:'pit',x:W+10,w:w}); }
+      else {
+        const r=Math.random();
+        if(r<0.22){ obs.push({type:'cone',x:W+10,w:16,h:Math.floor(38+Math.random()*6)}); }
+        else if(r<0.55){ obs.push({type:'cone',x:W+10,w:12,h:18}); }
+        else { obs.push({type:'cone',x:W+10,w:12,h:13}); }
+      }
+      spawn=Math.floor(64+Math.random()*46-speed*4); if(spawn<30)spawn=30;
+    }
+    for(const o of obs){ o.x-=speed; }
+    obs=obs.filter(o=>o.x+o.w>-6);
+    const pxL=px+2, pxR=px+pw-2, pyT=py+2, pyB=py+ph;
+    for(const o of obs){
+      if(o.type!=='cone') continue;
+      const oy=groundY-o.h;
+      if(pxR>o.x && pxL<o.x+o.w && pyB>oy && pyT<groundY){ gameOver(); break; }
+    }
+    score++; if(score%240===0 && speed<5.8) speed+=0.25;
+    legFrame=(legFrame+1)%20;
+  }
+  function rr(x,y,w,h,c){ ctx.fillStyle=c; ctx.fillRect(x,y,w,h); }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    const dark=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches;
+    rr(0,groundY,W,H-groundY, dark?'#2a3547':'#cdd7e6');
+    ctx.strokeStyle=dark?'#3a4658':'#b7c3d6'; ctx.beginPath(); ctx.moveTo(0,groundY+0.5); ctx.lineTo(W,groundY+0.5); ctx.stroke();
+    for(const o of obs){
+      if(o.type!=='pit') continue;
+      rr(o.x, groundY, o.w, H-groundY, dark?'#0c1119':'#aeb9c9');
+      rr(o.x-2, groundY, 2, 5, dark?'#46536a':'#98a6bb');
+      rr(o.x+o.w, groundY, 2, 5, dark?'#46536a':'#98a6bb');
+    }
+    for(const o of obs){
+      if(o.type!=='cone') continue;
+      const b=groundY, t=groundY-o.h, cx=o.x+o.w/2;
+      ctx.fillStyle='#e8873a'; ctx.beginPath(); ctx.moveTo(cx,t); ctx.lineTo(o.x-1,b); ctx.lineTo(o.x+o.w+1,b); ctx.closePath(); ctx.fill();
+      rr(o.x-2,b-2,o.w+4,2,'#c96f26');
+      rr(cx-o.w/2+1, t+o.h*0.45, o.w-2, 2.5, '#fff');
+      if(o.h>=30) rr(cx-o.w/2+2, t+o.h*0.72, o.w-4, 2.5, '#fff');
+    }
+    const y=py, run=(onGround && state==='play' && legFrame<10);
+    rr(px+3, y+8, 10, 9, '#3b5bdb');
+    rr(px+3, y+12, 10, 2, '#2f49b0');
+    if(run){ rr(px+3,y+17,4,4,'#26324a'); rr(px+9,y+17,4,3,'#26324a'); }
+    else   { rr(px+3,y+17,4,3,'#26324a'); rr(px+9,y+17,4,4,'#26324a'); }
+    rr(px+4, y+3, 8, 6, '#f2c79a');
+    rr(px+11, y+5, 2, 2, '#26324a');
+    rr(px+2, y+1, 12, 3, '#f6b21a');
+    rr(px+1, y+3, 14, 2, '#f6b21a');
+    rr(px+7, y-1, 2, 2, '#f6b21a');
+    ctx.fillStyle=dark?'#9aa7b8':'#5b6675'; ctx.font='bold 11px system-ui'; ctx.textAlign='right';
+    ctx.fillText('スコア '+Math.floor(score/6), W-8, 16);
+    if(state==='over'){
+      ctx.fillStyle='rgba(20,28,44,.55)'; ctx.fillRect(0,0,W,groundY);
+      ctx.fillStyle='#fff'; ctx.textAlign='center';
+      ctx.font='bold 15px system-ui'; ctx.fillText('ゲームオーバー', W/2, 52);
+      ctx.font='bold 12px system-ui'; ctx.fillText('スコア '+Math.floor(score/6)+'　最高 '+Math.floor(hi/6), W/2, 72);
+    } else if(state==='ready'){
+      ctx.fillStyle=dark?'#c7d0dd':'#3a4658'; ctx.textAlign='center'; ctx.font='bold 12px system-ui';
+      ctx.fillText('クリック / スペースでスタート', W/2, 46);
+    }
+    ctx.textAlign='left';
+  }
+  function isOpen(){ return widget.style.display!=='none'; }
+  function loop(){ if(isOpen()){ if(state==='play') update(); draw(); } raf=requestAnimationFrame(loop); }
+  cv.addEventListener('mousedown',e=>{ e.preventDefault(); jump(); });
+  cv.addEventListener('touchstart',e=>{ e.preventDefault(); jump(); },{passive:false});
+  window.addEventListener('keydown',e=>{
+    if(e.code!=='Space' || !isOpen()) return;
+    const tag=(e.target&&e.target.tagName)||''; if(/^(INPUT|TEXTAREA|SELECT)$/.test(tag)) return;  // 入力中のスペースは邪魔しない
+    e.preventDefault(); jump();
+  });
+  function setMin(min){
+    widget.style.display=min?'none':'';
+    fab.style.display=min?'':'none';
+    try{ localStorage.setItem(MINKEY, min?'1':'0'); }catch(e){}
+  }
+  document.getElementById('gameMin').addEventListener('click',()=>setMin(true));
+  fab.addEventListener('click',()=>setMin(false));
+  reset(); draw(); loop();
+  if(localStorage.getItem(MINKEY)==='1') setMin(true);
+})();
 </script>
 </body>
 </html>
