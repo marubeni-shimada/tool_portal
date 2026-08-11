@@ -537,12 +537,27 @@ form.addEventListener("submit",async e=>{
 });
 
 /* ---- Microsoft 365 ログイン（MSAL）で氏名を表示 ---- */
+/* ★ 修正(2026-08-10)：初回ロードで loginRedirect による全画面遷移をしない。
+   これが「初回はツールが出ず、リロードで出る」原因だった。
+   → サイレント取得(ssoSilent)だけ試し、取れなければ氏名欄に「サインイン」リンクを出すだけ。
+   → ツール一覧(loadTools)は認証と無関係に必ず即表示される。 */
+let PCA=null;
+function setAccount(account){
+  const el=document.getElementById("greet");
+  PCA.setActiveAccount(account);
+  window.__me={ name:account.name, email:account.username };
+  currentEmail=(account.username||"").toLowerCase();
+  currentName=norm(account.name||"");   // 表示名（公開範囲・管理者判定に使用）
+  el.innerHTML="ようこそ、<strong>"+escapeHtml(account.name||account.username)+"</strong> さん";
+  applyPerms();  // 池田玲なら登録ボタンを表示
+  render();      // 誰が見ているか判明したので、公開範囲でツールを出し分ける
+}
 async function initAuth(){
   const el=document.getElementById("greet");
   if(!AUTH.clientId){ el.textContent=""; return; }        // 未設定ならオフ
   if(!window.msal){ el.textContent=""; return; }           // ライブラリ未読込
 
-  const pca=new msal.PublicClientApplication({
+  PCA=new msal.PublicClientApplication({
     auth:{
       clientId:AUTH.clientId,
       authority:"https://login.microsoftonline.com/"+(AUTH.tenantId||"organizations"),
@@ -551,38 +566,36 @@ async function initAuth(){
     cache:{ cacheLocation:"sessionStorage" }
   });
   try{
-    await pca.initialize();
-    // リダイレクト帰還時の結果を処理
-    const redirect=await pca.handleRedirectPromise();
-    let account=(redirect&&redirect.account) || pca.getAllAccounts()[0];
+    await PCA.initialize();
+    // リダイレクト帰還時の結果を処理（サインインリンクを押して戻ってきた場合）
+    const redirect=await PCA.handleRedirectPromise();
+    let account=(redirect&&redirect.account) || PCA.getAllAccounts()[0];
 
     if(!account){
-      // 365にサインイン済みなら、追加ログインなしで取得を試みる
+      // 365にサインイン済みなら、追加ログインなしで取得を試みる（画面は飛ばさない）
       try{
-        const r=await pca.ssoSilent({ scopes:["User.Read"] });
+        const r=await PCA.ssoSilent({ scopes:["User.Read"] });
         account=r.account;
       }catch(e){
-        // サイレント不可 → 通常のリダイレクトログイン（多くは自動で戻る）
-        await pca.loginRedirect({ scopes:["User.Read"] });
-        return;
+        account=null;   // ← 旧: ここで loginRedirect して全画面遷移していた（初回ブランクの原因）
       }
     }
     if(account){
-      pca.setActiveAccount(account);
-      window.__me={ name:account.name, email:account.username };
-      currentEmail=(account.username||"").toLowerCase();
-      currentName=norm(account.name||"");   // 表示名（公開範囲・管理者判定に使用）
-      el.innerHTML="ようこそ、<strong>"+escapeHtml(account.name||account.username)+"</strong> さん";
-      applyPerms();  // 池田玲なら登録ボタンを表示
-      render();      // 誰が見ているか判明したので、公開範囲でツールを出し分ける
+      setAccount(account);
+    }else{
+      // 自動リダイレクトしない。クリックでサインインできるリンクだけ出す。
+      el.innerHTML='<a href="#" id="signinLink" style="color:var(--brand);text-decoration:none;font-size:13px">🔑 サインイン</a>';
+      const link=document.getElementById("signinLink");
+      if(link) link.addEventListener("click",ev=>{ ev.preventDefault(); try{ PCA.loginRedirect({ scopes:["User.Read"] }); }catch(_){}} );
     }
   }catch(err){
     el.textContent="";
   }
 }
 
-initAuth();
+// ツールは認証を待たずに即表示（先に呼ぶ）。認証は裏で走り、取れたら氏名表示＋限定ツール反映。
 loadTools();
+initAuth();
 </script>
 </body>
 </html>
