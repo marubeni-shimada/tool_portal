@@ -758,8 +758,8 @@ initAuth();
     e.preventDefault(); jump();
   });
   function setMin(min){
-    widget.style.display=min?'none':'';
-    fab.style.display=min?'':'none';
+    widget.style.display=min?'none':'block';
+    fab.style.display=min?'block':'none';
     try{ localStorage.setItem(MINKEY, min?'1':'0'); }catch(e){}
   }
   document.getElementById('gameMin').addEventListener('click',()=>setMin(true));
